@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log*
+
+.git
+.gitignore
+
+secrets
+logs
+state
+sessions
+artifacts
+
+README.md
+lhu-email-spec.md

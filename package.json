@@ -1,0 +1,19 @@
+{
+  "name": "lhu-email",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dockerized LHU login email automation job",
+  "main": "src/jobs/lhu-weekly-email.js",
+  "type": "commonjs",
+  "scripts": {
+    "smoke": "node src/smoke-playwright.js",
+    "job:lhu-login-check": "node src/jobs/lhu-login-check.js",
+    "job:lhu-email": "node src/jobs/lhu-weekly-email.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
+  }
+}

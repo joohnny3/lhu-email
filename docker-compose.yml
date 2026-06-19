@@ -1,0 +1,46 @@
+services:
+  smoke:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      TZ: Asia/Taipei
+    volumes:
+      - ./logs:/app/logs
+      - ./state:/app/state
+      - ./sessions:/app/sessions
+      - ./artifacts:/app/artifacts
+    command: ["npm", "run", "smoke"]
+    restart: "no"
+
+  lhu-weekly-email:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./secrets/lhu-weekly-email.env
+        required: true
+    environment:
+      TZ: Asia/Taipei
+      LHU_SEND_EMAIL: "true"
+    volumes:
+      - ./logs:/app/logs
+      - ./state:/app/state
+      - ./sessions:/app/sessions
+      - ./artifacts:/app/artifacts
+    command: ["npm", "run", "job:lhu-email"]
+    restart: "no"
+
+  lhu-login-check:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: ./secrets/lhu-weekly-email.env
+        required: true
+    environment:
+      TZ: Asia/Taipei
+    volumes:
+      - ./artifacts:/app/artifacts
+    command: ["npm", "run", "job:lhu-login-check"]
+    restart: "no"
