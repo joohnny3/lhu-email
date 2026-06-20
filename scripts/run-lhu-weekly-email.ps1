@@ -2,7 +2,7 @@
 param(
     [switch]$OnlyIfDue,
     [switch]$ShutdownWsl,
-    [int]$DockerReadyTimeoutSeconds = 180
+    [int]$DockerReadyTimeoutSeconds = 300
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,8 +70,22 @@ function Save-SuccessState {
 }
 
 function Test-DockerEngine {
-    & docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
-    return $LASTEXITCODE -eq 0
+    # docker.exe writes connection errors to stderr when the engine is down.
+    # Under $ErrorActionPreference = "Stop" that surfaces as a terminating
+    # NativeCommandError, so isolate the preference and rely only on the exit
+    # code. This must never throw, otherwise Start-DockerEngine can't run.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & docker info --format '{{.ServerVersion}}' > $null 2>&1
+        return ($LASTEXITCODE -eq 0)
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 }
 
 function Start-DockerEngine {
