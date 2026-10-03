@@ -58,7 +58,9 @@ async function login(page, config) {
   await page.goto(config.url, { waitUntil: 'domcontentloaded' });
 
   const username = page.locator('input[name="USERID"]:visible');
-  const password = page.locator('input[name="PASSWD"][type="password"]:visible');
+  // Mail2000 moved name="PASSWD" onto a hidden field that its own script fills on
+  // submit; the visible box is now #passwd_plain. Match by type so both layouts work.
+  const password = page.locator('input[type="password"]:visible');
   if (await username.count() !== 1 || await password.count() !== 1) {
     throw new Error('Could not identify the LHU login fields');
   }
@@ -75,6 +77,9 @@ async function login(page, config) {
   await username.fill(config.username);
   await password.fill(config.password);
   await submit.click();
+  // The page now submits from a promise callback, so the navigation starts after
+  // click() returns. Wait for it rather than relying on a fixed sleep.
+  await page.waitForURL((url) => safeLocation(url.href) !== safeLocation(config.url), { waitUntil: 'domcontentloaded' }).catch(() => undefined);
   await page.waitForTimeout(1_500);
 
   if (await page.locator('input[type="password"]:visible').count() > 0 || safeLocation(page.url()) === safeLocation(config.url)) {
