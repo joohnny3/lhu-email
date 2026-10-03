@@ -5,6 +5,8 @@ const path = require('node:path');
 const { chromium } = require('@playwright/test');
 
 const REQUIRED_ENV = ['LHU_URL', 'LHU_USERNAME', 'LHU_PASSWORD', 'MAIL_TO'];
+const RESULT_FILE = path.resolve('state/lhu-weekly-email-result.json');
+const RETRY_DELAY_MS = 15_000;
 
 function taipeiDate() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -45,6 +47,12 @@ function safeLocation(rawUrl) {
   return `${url.origin}${url.pathname}`;
 }
 
+// The category tells the scheduler wrapper what to report: 'site-changed' needs a
+// code fix, 'auth' needs new credentials.
+function failure(category, message) {
+  return Object.assign(new Error(message), { category });
+}
+
 async function saveFailureScreenshot(page) {
   const directory = path.resolve('artifacts/lhu-weekly-email');
   await fs.mkdir(directory, { recursive: true });
@@ -52,6 +60,17 @@ async function saveFailureScreenshot(page) {
   const file = path.join(directory, `failure-${timestamp}.png`);
   await page.screenshot({ path: file, fullPage: true });
   return path.relative(process.cwd(), file);
+}
+
+async function saveResult(result) {
+  // Read by scripts/run-lhu-weekly-email.ps1 to choose the failure notice. It is
+  // advisory, so a write error must not turn a sent email into a failed run.
+  try {
+    await fs.mkdir(path.dirname(RESULT_FILE), { recursive: true });
+    await fs.writeFile(RESULT_FILE, JSON.stringify(result, null, 2));
+  } catch {
+    // Keep the job's own outcome.
+  }
 }
 
 async function login(page, config) {
@@ -62,17 +81,17 @@ async function login(page, config) {
   // submit; the visible box is now #passwd_plain. Match by type so both layouts work.
   const password = page.locator('input[type="password"]:visible');
   if (await username.count() !== 1 || await password.count() !== 1) {
-    throw new Error('Could not identify the LHU login fields');
+    throw failure('site-changed', 'Could not identify the LHU login fields');
   }
 
   const form = password.locator('xpath=ancestor::form[1]');
   const action = new URL((await form.getAttribute('action')) || config.url, page.url());
   if (action.origin !== new URL(config.url).origin) {
-    throw new Error('Refusing to submit credentials to a different origin');
+    throw failure('site-changed', 'Refusing to submit credentials to a different origin');
   }
 
   const submit = form.locator('input[type="submit"]:visible, button[type="submit"]:visible');
-  if (await submit.count() !== 1) throw new Error('Could not identify the LHU login button');
+  if (await submit.count() !== 1) throw failure('site-changed', 'Could not identify the LHU login button');
 
   await username.fill(config.username);
   await password.fill(config.password);
@@ -83,17 +102,17 @@ async function login(page, config) {
   await page.waitForTimeout(1_500);
 
   if (await page.locator('input[type="password"]:visible').count() > 0 || safeLocation(page.url()) === safeLocation(config.url)) {
-    throw new Error('LHU login failed or could not be verified');
+    throw failure('auth', 'LHU login failed or could not be verified');
   }
 }
 
 async function openCompose(page) {
   await page.waitForTimeout(2_000);
   const submenu = page.frames().find((frame) => safeLocation(frame.url()).endsWith('/cgi-bin/submenu'));
-  if (!submenu) throw new Error('Could not find the LHU submenu frame');
+  if (!submenu) throw failure('site-changed', 'Could not find the LHU submenu frame');
 
   const compose = submenu.locator('[onclick*="S_GoCompose"]');
-  if (await compose.count() !== 1) throw new Error('Could not identify the LHU compose control');
+  if (await compose.count() !== 1) throw failure('site-changed', 'Could not identify the LHU compose control');
   await compose.click();
 
   const deadline = Date.now() + 15_000;
@@ -102,7 +121,7 @@ async function openCompose(page) {
     if (frame && await frame.locator('#SendButton').count() === 1) return frame;
     await page.waitForTimeout(250);
   }
-  throw new Error('LHU compose form did not become ready');
+  throw failure('site-changed', 'LHU compose form did not become ready');
 }
 
 async function fillAndVerify(compose, config) {
@@ -112,7 +131,7 @@ async function fillAndVerify(compose, config) {
   const send = compose.locator('#SendButton');
 
   if (await recipient.count() !== 1 || await subject.count() !== 1 || await body.count() !== 1 || await send.count() !== 1) {
-    throw new Error('The LHU compose form structure has changed');
+    throw failure('site-changed', 'The LHU compose form structure has changed');
   }
 
   await recipient.fill(config.recipient);
@@ -126,16 +145,16 @@ async function fillAndVerify(compose, config) {
     body: await body.inputValue()
   };
   if (actual.recipient !== config.recipient || actual.subject !== config.subject || actual.body !== config.body) {
-    throw new Error('Compose field verification failed');
+    throw failure('site-changed', 'Compose field verification failed');
   }
 
   return send;
 }
 
-async function main() {
-  const config = configFromEnv();
+async function attempt(config) {
   let browser;
   let page;
+  let sendClicked = false;
 
   try {
     browser = await chromium.launch({ headless: true });
@@ -158,17 +177,17 @@ async function main() {
     const sendButton = await fillAndVerify(compose, config);
 
     if (!config.send) {
-      console.log(JSON.stringify({
+      return {
         ok: true,
         dryRun: true,
         recipient: config.recipient,
         subject: config.subject,
         body: config.body,
         date: config.date
-      }, null, 2));
-      return;
+      };
     }
 
+    sendClicked = true;
     await sendButton.click();
     await page.waitForTimeout(4_000);
     if (unexpectedDialog) throw new Error(`Unexpected dialog while sending: ${unexpectedDialog}`);
@@ -180,13 +199,13 @@ async function main() {
       throw new Error('Email send could not be verified');
     }
 
-    console.log(JSON.stringify({
+    return {
       ok: true,
       sent: true,
       recipient: config.recipient,
       subject: config.subject,
       date: config.date
-    }, null, 2));
+    };
   } catch (error) {
     let screenshot = null;
     if (page) {
@@ -196,14 +215,37 @@ async function main() {
         // Preserve the original error.
       }
     }
-    console.error(JSON.stringify({
+    const message = error instanceof Error ? error.message : String(error);
+    return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      category: sendClicked ? 'send-unverified' : (error?.category ?? (/net::ERR_/.test(message) ? 'network' : 'unknown')),
+      error: message,
       screenshot
-    }, null, 2));
-    process.exitCode = 1;
+    };
   } finally {
     await browser?.close();
+  }
+}
+
+async function main() {
+  const config = configFromEnv();
+
+  let result = await attempt(config);
+  // A one-off timing glitch fails the same way a redesign does, so only report a
+  // failure that repeats. Never retry once Send was clicked (duplicate mail) or
+  // after a rejected login (repeated bad logins can lock the account).
+  if (!result.ok && !['send-unverified', 'auth'].includes(result.category)) {
+    console.error(JSON.stringify({ ...result, retrying: true }, null, 2));
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    result = { ...await attempt(config), attempts: 2 };
+  }
+
+  await saveResult(result);
+  if (result.ok) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.error(JSON.stringify(result, null, 2));
+    process.exitCode = 1;
   }
 }
 
