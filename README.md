@@ -56,6 +56,9 @@ MAIL_SUBJECT_TEMPLATE=LHU weekly email {{TODAY_TAIPEI}}
 MAIL_BODY_TEMPLATE=LHU weekly email {{TODAY_TAIPEI}}
 
 TZ=Asia/Taipei
+
+# 選填：排程失敗時通知的 Discord Webhook，見「8. 失敗通知」
+DISCORD_WEBHOOK_URL=
 ```
 
 `{{TODAY_TAIPEI}}` 會在寄信時替換成台北當天日期，例如 `2026-06-19`。
@@ -136,9 +139,11 @@ docker compose run --rm lhu-weekly-email
 ```text
 Task Scheduler
 → 判斷本週是否已成功執行
+→ 確認連得到 LHU_URL 的主機，最多等 30 秒
 → 啟動 Docker Desktop
-→ 等待 Docker Engine ready，最多 180 秒
+→ 等待 Docker Engine ready，最多 300 秒
 → docker compose run --rm lhu-weekly-email
+→ 失敗時送出通知
 → docker compose down --remove-orphans
 ```
 
@@ -181,7 +186,34 @@ Get-Content -Tail 30 .\logs\lhu-weekly-email\task-scheduler.log
 
 `LastTaskResult = 0` 或工作排程器顯示 `0x0` 代表任務正常結束。若本週已寄送，手動觸發只會留下 `Current weekly slot has already completed; skipping`，不會重寄。
 
-## 8. 移轉到另一台電腦
+## 8. 失敗通知
+
+排程失敗時會通知原因。先嘗試 Discord；沒有設定 Webhook 或送不出去（例如電腦沒有網路）時，改用 Windows 通知。
+
+| 類別 | 判斷方式 |
+| --- | --- |
+| 網路 | 開跑前 30 秒內連不到 `LHU_URL` 的主機；不會啟動 Docker |
+| 網站改版 | 找不到預期的登入欄位、寫信按鈕或表單；隔 15 秒重試一次仍失敗才回報 |
+| 帳密失效 | 送出登入後仍停在登入頁；不重試，避免帳號被鎖 |
+| 寄送未確認 | 已按下傳送但無法確認結果；不重試，避免重複寄信 |
+
+啟用 Discord 通知：在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立 Webhook，將網址寫入 `secrets/lhu-weekly-email.env`：
+
+```env
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
+
+Webhook 網址等同密碼，拿到的人都能對該頻道發訊息，不要提交至 Git。
+
+送出一則測試通知，不會登入也不會寄信：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-lhu-weekly-email.ps1 -TestNotification
+```
+
+通知文字在 `scripts/failure-messages.json`。每次執行的結果會寫入 `state/lhu-weekly-email-result.json`。
+
+## 9. 移轉到另一台電腦
 
 1. 在舊電腦停用或刪除 `LHU Weekly Email` 排程。
 2. Push 程式碼到 GitHub；不要上傳真實 env、state、log 或 artifacts。
@@ -203,7 +235,7 @@ Disable-ScheduledTask -TaskName "LHU Weekly Email"
 Unregister-ScheduledTask -TaskName "LHU Weekly Email" -Confirm:$false
 ```
 
-## 9. GitHub 初次上傳
+## 10. GitHub 初次上傳
 
 目前資料夾若尚未初始化 Git：
 

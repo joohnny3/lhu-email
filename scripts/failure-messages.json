@@ -1,0 +1,13 @@
+{
+  "title": "LHU 週信寄送失敗",
+  "test": "【測試】這不是真的失敗，只是確認通知能送到。",
+  "network-no-link": "電腦沒有連上任何網路（Wi-Fi 未連線）。連上網路後，下次開機登入 Windows 時會自動補寄。",
+  "network-no-internet": "Wi-Fi 有連上，但連不到網際網路。網路恢復後，下次開機登入 Windows 時會自動補寄。",
+  "network-host-down": "網路正常，但連不到學校信箱主機，可能是學校端暫時故障。下次開機登入 Windows 時會自動重試。",
+  "network": "執行途中網路中斷。下次開機登入 Windows 時會自動重試。",
+  "site-changed": "信箱網頁可能改版了：重試一次後仍找不到預期的欄位或按鈕，需要修改程式才會恢復。",
+  "auth": "學校信箱登入失敗，密碼可能已變更或過期。請更新 secrets/lhu-weekly-email.env 裡的帳密。",
+  "send-unverified": "已按下傳送，但無法確認信是否寄出。請到收件信箱確認；下次開機登入 Windows 時會再寄一次。",
+  "docker": "Docker 沒有成功啟動，所以這次沒有執行。下次開機登入 Windows 時會自動重試。",
+  "unknown": "發生未分類的錯誤，請查看 logs/lhu-weekly-email/task-scheduler.log。"
+}
